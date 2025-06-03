@@ -4,7 +4,7 @@ import twixtools
 import numpy as np
 import nibabel as nib 
 from .protocol import protocol_parse
-from .reco_tools import POCS, coil_combination, calc_coil_sensitivity
+from .reco_tools import POCS, coil_combination, calc_coil_sensitivity, grappa_reconstruction, get_max_idx
 from .transformation import calc_nifti_affine
 
 class recotwix(): 
@@ -99,15 +99,82 @@ class recotwix():
         else:
             self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
 
+    def runReco_GRAPPA(self, method_sensitivity='caldir'):
+        torch.cuda.empty_cache()   
 
+        kspace = self._getkspace()        
+        kspace = self.correct_scan_size(kspace, scantype='image')
+        
+        # Partial Fourier?
+        if self.prot.isPartialFourierRO:
+            kspace = POCS(kspace, dim_enc=self.dim_enc, dim_pf=self.dim_info['Col']['ind'])
+        if self.prot.isPartialFourierPE1:
+            kspace = POCS(kspace, dim_enc=self.dim_enc, dim_pf=self.dim_info['Lin']['ind'])
+        if self.prot.isPartialFourierPE2:
+            kspace = POCS(kspace, dim_enc=self.dim_enc, dim_pf=self.dim_info['Par']['ind'])
+
+        # Parallel Imaging?
+        if self.prot.isParallelImaging:
+            self.twixmap['refscan'].flags['zf_missing_lines'] = not self.prot.isRefScanSeparate 
+            acs = torch.from_numpy(self.twixmap['refscan'][:])
+            acs = self.correct_scan_size(acs, scantype='refscan')
+                    # Partial Fourier?
+            if self.prot.isPartialFourierRO:
+                acs = POCS(acs, dim_enc=self.dim_enc, dim_pf=self.dim_info['Col']['ind'])
+            if self.prot.isPartialFourierPE1:
+                acs = POCS(acs, dim_enc=self.dim_enc, dim_pf=self.dim_info['Lin']['ind'])
+            if self.prot.isPartialFourierPE2:
+                acs = POCS(acs, dim_enc=self.dim_enc, dim_pf=self.dim_info['Par']['ind'])
+
+        else:
+            # picking the 0th element of the free dimensions 
+            acs = kspace.clone()
+            for dim_free in self.dim_free:
+                acs = acs.index_select(self.dim_info[dim_free]['ind'], torch.Tensor([0]).int()) 
+
+        af = [
+            self.twixobj['hdr']['MeasYaps']['sPat']['lAccelFactPE'],
+            self.twixobj['hdr']['MeasYaps']['sPat']['lAccelFact3D'],
+        ]
+        if max(af) > 1:
+            kspace_reco = grappa_reconstruction(
+                kspace,
+                acs,
+                af,
+            )
+            # correct scan size
+            kspace_center_col = get_max_idx(kspace, self.dim_info['Col']['ind'])
+            kspace_center_lin = get_max_idx(kspace, self.dim_info['Lin']['ind'])
+            kspace_center_par = get_max_idx(kspace, self.dim_info['Par']['ind'])
+            kspace = self.correct_scan_size(
+                kspace_reco, 
+                scantype='image', 
+                kspace_center_col=kspace_center_col,
+                kspace_center_lin=kspace_center_lin,
+                kspace_center_par=kspace_center_par
+            )
+        if method_sensitivity is not None:
+            coils_sensitivity = calc_coil_sensitivity(acs, dim_enc=self.dim_enc, method=method_sensitivity)
+            self.img = coil_combination(kspace, coil_sens=coils_sensitivity, dim_enc=self.dim_enc, supress_output=True)
+        else:
+            self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
+        
     ##########################################################
-    def correct_scan_size(self, kspace:torch.Tensor, scantype='image'):
+    def correct_scan_size(self, kspace:torch.Tensor, scantype='image', kspace_center_col=None, kspace_center_lin=None, kspace_center_par=None):
+        
+        if kspace_center_col is None:
+            kspace_center_col = self.twixmap[scantype].kspace_center_col
+        if kspace_center_lin is None:
+            kspace_center_lin = self.twixmap[scantype].kspace_center_lin
+        if kspace_center_par is None:
+            kspace_center_par = self.twixmap[scantype].kspace_center_par
+            
         # Note: this function suppose oversampling is removed
         import torch.nn.functional as F
         print(f'kspace original shape : {kspace.shape}, scantype: {scantype}')
-        col_diff = self.hdr['Meas']['iRoFTLength']//2 - self.twixmap[scantype].kspace_center_col
-        lin_diff = self.hdr['Meas']['iPEFTLength']//2 - self.twixmap[scantype].kspace_center_lin
-        par_diff = self.hdr['Meas']['i3DFTLength']//2 - self.twixmap[scantype].kspace_center_par
+        col_diff = self.hdr['Meas']['iRoFTLength']//2 - kspace_center_col
+        lin_diff = self.hdr['Meas']['iPEFTLength']//2 - kspace_center_lin
+        par_diff = self.hdr['Meas']['i3DFTLength']//2 - kspace_center_par
         if kspace.shape[self.dim_info['Lin']['ind']] == self.hdr['Meas']['iPEFTLength']:
             lin_diff = 0
         if kspace.shape[self.dim_info['Par']['ind']] == self.hdr['Meas']['i3DFTLength']:

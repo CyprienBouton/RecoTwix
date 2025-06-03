@@ -5,6 +5,7 @@ import numpy as np
 from bart import bart
 from tqdm import tqdm
 from scipy import ndimage
+import ggrappa
 
 lib_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils', 'lib')
 
@@ -290,3 +291,51 @@ def mask_brain(brain_mag:torch.Tensor, erode_size=3):
 
     return torch.from_numpy(mask.copy(order='C').astype(np.float32))
     
+    ##########################################################
+def crop_nonzero_region(tensor: torch.Tensor):
+    mag = tensor.abs().sum(0) > 0
+    coords = torch.nonzero(mag, as_tuple=False)
+    mins, maxs = coords.min(0).values, coords.max(0).values + 1
+    ky_min, kz_min, kx_min = mins.tolist()
+    ky_max, kz_max, kx_max = maxs.tolist()
+    return tensor[:, ky_min:ky_max, kz_min:kz_max, kx_min:kx_max]
+
+
+def grappa_reconstruction(kspace: torch.Tensor, acs: torch.Tensor, af):
+    """Reconstructs the k-space using GRAPPA method.
+
+    Args:
+        kspace (torch.Tensor): K-space data.
+        acs (torch.Tensor): Autocalibration signal data.
+        af (int): Acceleration factor.
+
+    Returns:
+        torch.Tensor: Reconstructed k-space.    
+        """
+    print('GRAPPA reconstruction...')
+    torch.cuda.empty_cache()
+    kspace_bart, unflatten_shape = toBART(kspace)
+    assert max(kspace_bart.shape[4:]) == 1, "GRAPPA reconstruction only supports 3D data with coils in the 4th dimension."
+    acs_bart, _ = toBART(acs)
+
+    kspace_crop = crop_nonzero_region(kspace_bart.squeeze().swapaxes(3,0))
+    acs_crop = crop_nonzero_region(acs_bart.squeeze().swapaxes(3,0))
+    
+    kspace_reco, _ = ggrappa.GRAPPA_Recon(kspace_crop, acs_crop, af)
+    kspace_reco_bart = kspace_reco.swapaxes(3,0)
+    kspace_reco_out = fromBART(kspace_reco_bart, unflatten_shape)
+
+    return kspace_reco_out
+
+
+def get_max_idx(tensor: torch.Tensor, dim: int = -1):
+    """Get the index of the maximum value along a specified dimension.
+
+    Args:
+        tensor (torch.Tensor): Input tensor.
+        dim (int, optional): Dimension along which to find the maximum. Defaults to -1.
+
+    Returns:
+        torch.Tensor: Indices of the maximum values.
+    """
+    return tensor.abs().numpy().max(tuple(set(range(tensor.ndim)) - set([dim]))).argmax()
