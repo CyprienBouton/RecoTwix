@@ -318,8 +318,8 @@ def grappa_reconstruction(kspace: torch.Tensor, acs: torch.Tensor, af):
     assert max(kspace_bart.shape[4:]) == 1, "GRAPPA reconstruction only supports 3D data with coils in the 4th dimension."
     acs_bart, _ = toBART(acs)
 
-    kspace_crop = crop_nonzero_region(kspace_bart.squeeze().swapaxes(3,0))
-    acs_crop = crop_nonzero_region(acs_bart.squeeze().swapaxes(3,0))
+    kspace_crop = crop_nonzero_region(kspace_bart.reshape(kspace_bart.shape[:4]).swapaxes(3,0))
+    acs_crop = crop_nonzero_region(acs_bart.reshape(acs_bart.shape[:4]).swapaxes(3,0))
     
     kspace_reco, _ = ggrappa.GRAPPA_Recon(kspace_crop, acs_crop, af)
     kspace_reco_bart = kspace_reco.swapaxes(3,0)
