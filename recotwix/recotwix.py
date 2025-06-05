@@ -129,9 +129,9 @@ class recotwix():
                 af,
             )
             # correct scan size
-            kspace_center_col = get_max_idx(kspace, self.dim_info['Col']['ind'])
-            kspace_center_lin = get_max_idx(kspace, self.dim_info['Lin']['ind'])
-            kspace_center_par = get_max_idx(kspace, self.dim_info['Par']['ind'])
+            kspace_center_col = get_max_idx(kspace_reco, self.dim_info['Col']['ind'])
+            kspace_center_lin = get_max_idx(kspace_reco, self.dim_info['Lin']['ind'])
+            kspace_center_par = get_max_idx(kspace_reco, self.dim_info['Par']['ind'])
             kspace = self.correct_scan_size(
                 kspace_reco, 
                 scantype='image', 
