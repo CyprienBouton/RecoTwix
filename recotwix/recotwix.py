@@ -105,26 +105,12 @@ class recotwix():
         kspace = self._getkspace()        
         kspace = self.correct_scan_size(kspace, scantype='image')
         
-        # Partial Fourier?
-        if self.prot.isPartialFourierRO:
-            kspace = POCS(kspace, dim_enc=self.dim_enc, dim_pf=self.dim_info['Col']['ind'])
-        if self.prot.isPartialFourierPE1:
-            kspace = POCS(kspace, dim_enc=self.dim_enc, dim_pf=self.dim_info['Lin']['ind'])
-        if self.prot.isPartialFourierPE2:
-            kspace = POCS(kspace, dim_enc=self.dim_enc, dim_pf=self.dim_info['Par']['ind'])
-
         # Parallel Imaging?
         if self.prot.isParallelImaging:
             self.twixmap['refscan'].flags['zf_missing_lines'] = not self.prot.isRefScanSeparate 
             acs = torch.from_numpy(self.twixmap['refscan'][:])
             acs = self.correct_scan_size(acs, scantype='refscan')
                     # Partial Fourier?
-            if self.prot.isPartialFourierRO:
-                acs = POCS(acs, dim_enc=self.dim_enc, dim_pf=self.dim_info['Col']['ind'])
-            if self.prot.isPartialFourierPE1:
-                acs = POCS(acs, dim_enc=self.dim_enc, dim_pf=self.dim_info['Lin']['ind'])
-            if self.prot.isPartialFourierPE2:
-                acs = POCS(acs, dim_enc=self.dim_enc, dim_pf=self.dim_info['Par']['ind'])
 
         else:
             # picking the 0th element of the free dimensions 
@@ -153,11 +139,8 @@ class recotwix():
                 kspace_center_lin=kspace_center_lin,
                 kspace_center_par=kspace_center_par
             )
-        if method_sensitivity is not None:
-            coils_sensitivity = calc_coil_sensitivity(acs, dim_enc=self.dim_enc, method=method_sensitivity)
-            self.img = coil_combination(kspace, coil_sens=coils_sensitivity, dim_enc=self.dim_enc, supress_output=True)
-        else:
-            self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
+        
+        self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
         
     ##########################################################
     def correct_scan_size(self, kspace:torch.Tensor, scantype='image', kspace_center_col=None, kspace_center_lin=None, kspace_center_par=None):
