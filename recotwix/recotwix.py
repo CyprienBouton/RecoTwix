@@ -99,7 +99,7 @@ class recotwix():
         else:
             self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
 
-    def runReco_GRAPPA(self, method_sensitivity='caldir'):
+    def runReco_GRAPPA(self):
         torch.cuda.empty_cache()   
 
         kspace = self._getkspace()        
@@ -123,23 +123,12 @@ class recotwix():
             self.twixobj['hdr']['MeasYaps']['sPat']['lAccelFact3D'],
         ]
         if max(af) > 1:
-            kspace_reco = grappa_reconstruction(
+            kspace = grappa_reconstruction(
                 kspace,
                 acs,
                 af,
             )
-            # correct scan size
-            kspace_center_col = get_max_idx(kspace_reco, self.dim_info['Col']['ind'])
-            kspace_center_lin = get_max_idx(kspace_reco, self.dim_info['Lin']['ind'])
-            kspace_center_par = get_max_idx(kspace_reco, self.dim_info['Par']['ind'])
-            kspace = self.correct_scan_size(
-                kspace_reco, 
-                scantype='image', 
-                kspace_center_col=kspace_center_col,
-                kspace_center_lin=kspace_center_lin,
-                kspace_center_par=kspace_center_par
-            )
-        
+            
         self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
         
     ##########################################################
