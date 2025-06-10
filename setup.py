@@ -24,6 +24,6 @@ setup(name='recotwix', # this will be name of package in packages list : pip lis
             'torch',
             'twixtools', 
             'scipy',
-            'ggrappa @ git+https://github.com/mind-inria/ggrappa.git@main',
+            'ggrappa @ git+https://github.com/CyprienBouton/ggrappa.git@fix_grid_size',
       ]
      )
