@@ -292,13 +292,43 @@ def mask_brain(brain_mag:torch.Tensor, erode_size=3):
     return torch.from_numpy(mask.copy(order='C').astype(np.float32))
     
     ##########################################################
-def crop_nonzero_region(tensor: torch.Tensor):
-    mag = tensor.abs().sum(0) > 0
-    coords = torch.nonzero(mag, as_tuple=False)
+def crop_nonzero_region(
+    tensor: torch.Tensor,
+    crop_dims = (0, 1, 2)  # ky=0, kz=1, kx=2
+):
+    """
+    Crops tensor along specified spatial axes (ky, kz, kx).
+
+    Args:
+        tensor (torch.Tensor): Input tensor of shape (C, ky, kz, kx)
+        crop_dims (tuple): Dimensions to crop (ky=0, kz=1, kx=2)
+    
+    Returns:
+        Cropped tensor
+    """
+    if isinstance(crop_dims, int):
+        crop_dims = tuple(crop_dims)
+    assert tensor.ndim == 4, "Expected tensor of shape (C, ky, kz, kx)"
+    assert all(d in [0, 1, 2] for d in crop_dims), "Can only crop ky=0, kz=1, or kx=2"
+
+    # Compute binary mask of nonzero values over channels
+    mag = tensor.abs().sum(dim=0) > 0  # shape: (ky, kz, kx)
+    mag_proj = mag
+
+    # Collapse over non-cropped dims
+    for d in list( set([0, 1, 2]) - set(crop_dims) )[::-1]:
+        mag_proj = mag_proj.any(dim=d)
+
+    coords = torch.nonzero(mag_proj, as_tuple=False)
     mins, maxs = coords.min(0).values, coords.max(0).values + 1
-    ky_min, kz_min, kx_min = mins.tolist()
-    ky_max, kz_max, kx_max = maxs.tolist()
-    return tensor[:, ky_min:ky_max, kz_min:kz_max, kx_min:kx_max]
+
+    # Prepare slicing
+    slices = [slice(None)] * 4  # (C, ky, kz, kx)
+    for i, d in enumerate(sorted(crop_dims)):
+        slices[d + 1] = slice(mins[i].item(), maxs[i].item())  # d+1 to offset channel dim
+
+    return tensor[slices[0], slices[1], slices[2], slices[3]]
+
 
 
 def grappa_reconstruction(kspace: torch.Tensor, acs: torch.Tensor, af):
@@ -318,10 +348,10 @@ def grappa_reconstruction(kspace: torch.Tensor, acs: torch.Tensor, af):
     assert max(kspace_bart.shape[4:]) == 1, "GRAPPA reconstruction only supports 3D data with coils in the 4th dimension."
     acs_bart, _ = toBART(acs)
 
-    kspace_crop = crop_nonzero_region(kspace_bart.reshape(kspace_bart.shape[:4]).swapaxes(3,0))
-    acs_crop = crop_nonzero_region(acs_bart.reshape(acs_bart.shape[:4]).swapaxes(3,0))
+    kspace_cropped = kspace_bart.reshape(kspace_bart.shape[:4]).swapaxes(3,0)
+    acs_cropped = crop_nonzero_region(acs_bart.reshape(acs_bart.shape[:4]).swapaxes(3,0))
     
-    kspace_reco, _ = ggrappa.GRAPPA_Recon(kspace_crop, acs_crop, af)
+    kspace_reco, _ = ggrappa.GRAPPA_Recon(kspace_cropped, acs_cropped, af)
     kspace_reco_bart = kspace_reco.swapaxes(3,0)
     kspace_reco_out = fromBART(kspace_reco_bart, unflatten_shape)
 
