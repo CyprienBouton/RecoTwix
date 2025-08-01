@@ -4,8 +4,9 @@ import twixtools
 import numpy as np
 import nibabel as nib 
 from .protocol import protocol_parse
-from .reco_tools import POCS, coil_combination, calc_coil_sensitivity, grappa_reconstruction, get_max_idx
+from .reco_tools import POCS, coil_combination, calc_coil_sensitivity, grappa_reconstruction, pics_reconstruction
 from .transformation import calc_nifti_affine
+from .pmu import get_actual_trigger_timing
 
 class recotwix(): 
     hdr      = {}
@@ -130,6 +131,31 @@ class recotwix():
             )
             
         self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
+    
+        
+    def runReco_corrupted_RR_cs(
+        self,
+        trigger_method = 'ECG1',
+        method: str = 'caldir',
+        alpha: float = 0.1,
+        regularization_value = 0.1,
+    ):
+        kspace = self._getkspace()
+        RD_matrix = self.get_RD_matrix(trigger_method)
+        kspace_sparse = kspace.clone()
+        kspace_sparse = kspace_sparse
+        
+        broadcast_shape = [1] * kspace_sparse.ndim
+        broadcast_shape[self.dim_info['Par']['ind']] = RD_matrix.shape[0]  # Par
+        broadcast_shape[self.dim_info['Lin']['ind']] = RD_matrix.shape[1]  # Lin
+        RD_mask = (abs(RD_matrix - RD_matrix.mode().values.item()) > alpha * RD_matrix.std() ).view(broadcast_shape)
+
+        # Apply masking to k-space
+        kspace_sparse = kspace_sparse.masked_fill(RD_mask, 0)
+        # kspace_sparse = self.correct_scan_size(kspace_sparse, scantype='image')
+        
+        coil_sens = calc_coil_sensitivity(kspace_sparse, self.dim_enc, method=method)
+        self.img = pics_reconstruction(kspace_sparse, coil_sens, regularization_value).abs()
         
     ##########################################################
     def correct_scan_size(self, kspace:torch.Tensor, scantype='image', kspace_center_col=None, kspace_center_lin=None, kspace_center_par=None):
@@ -172,7 +198,37 @@ class recotwix():
         print(f'kspace corrected shape: {kspace.shape}, scantype: {scantype}')
         return kspace
 
+    def get_RD_matrix(self, trigger_method='ECG1', TI=None):
+        RD_matrix = torch.zeros((self.dim_info['Par']['len'], self.dim_info['Lin']['len']), dtype=float)
+        
+        mdbs = [ mdb for mdb in self.twixobj['mdb'] if mdb.is_image_scan() ]
+    
+        klin = torch.tensor([ mdb.cLin for mdb in mdbs])
+        kpar = torch.tensor([ mdb.cPar for mdb in mdbs])
 
+        acquisition_order = klin + kpar*self.dim_info['Lin']['len']
+    
+        start_time = self.twixobj['mdb'][0].mdh.TimeStamp
+        acquisition_timing = torch.tensor([mdb.mdh.TimeStamp for mdb in mdbs])
+        acquisition_timing = (acquisition_timing - start_time)  * 2.5e-3 # convert to seconds
+    
+        trigger_timing = get_actual_trigger_timing(self.twixobj, trigger_method) # triggers seen by the sequence
+        idx_trigger_before = torch.searchsorted(trigger_timing, acquisition_timing) - 1
+        RDs = torch.cat([torch.tensor([0]),trigger_timing.diff()])
+        
+        RD_matrix.flatten()[acquisition_order] = RDs[idx_trigger_before]
+        
+        if TI is None:
+            try:
+                TI = self.twixobj['hdr']['Phoenix']['alTI'][0]*1e-6  # convert to seconds
+            except:
+                Warning('Fail to read TI')
+                TI = 0 # assume no TI
+        # the recovery duration does not take into account the inversion time
+        RD_matrix -= TI
+        
+        return RD_matrix
+        
     ##########################################################
 
     def _getkspace(self, scantype='image'):
