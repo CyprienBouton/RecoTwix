@@ -137,24 +137,37 @@ class recotwix():
         self,
         trigger_method = 'ECG1',
         method: str = 'caldir',
-        alpha: float = 0.1,
+        alpha: float = 1.,
         regularization_value = 0.1,
     ):
         kspace = self._getkspace()
         RD_matrix = self.get_RD_matrix(trigger_method)
         kspace_sparse = kspace.clone()
-        kspace_sparse = kspace_sparse
         
         broadcast_shape = [1] * kspace_sparse.ndim
         broadcast_shape[self.dim_info['Par']['ind']] = RD_matrix.shape[0]  # Par
         broadcast_shape[self.dim_info['Lin']['ind']] = RD_matrix.shape[1]  # Lin
-        RD_mask = (abs(RD_matrix - RD_matrix.mode().values.item()) > alpha * RD_matrix.std() ).view(broadcast_shape)
+        flat = RD_matrix.flatten()
+        non_zero = flat[flat != 0]
+        mode_value = torch.mode(non_zero).values.item()
+        RD_mask = (abs(RD_matrix - mode_value) > alpha * RD_matrix.std() ).view(broadcast_shape)
 
         # Apply masking to k-space
         kspace_sparse = kspace_sparse.masked_fill(RD_mask, 0)
-        # kspace_sparse = self.correct_scan_size(kspace_sparse, scantype='image')
+        kspace_sparse = self.correct_scan_size(kspace_sparse, scantype='image')
+        if self.prot.isParallelImaging:
+            self.twixmap['refscan'].flags['zf_missing_lines'] = not self.prot.isRefScanSeparate 
+            acs = torch.from_numpy(self.twixmap['refscan'][:])
+            acs = self.correct_scan_size(acs, scantype='refscan')
+                    # Partial Fourier?
+
+        else:
+            # picking the 0th element of the free dimensions 
+            acs = kspace.clone()
+            for dim_free in self.dim_free:
+                acs = acs.index_select(self.dim_info[dim_free]['ind'], torch.Tensor([0]).int()) 
         
-        coil_sens = calc_coil_sensitivity(kspace_sparse, self.dim_enc, method=method)
+        coil_sens = calc_coil_sensitivity(acs, self.dim_enc, method=method)
         self.img = pics_reconstruction(kspace_sparse, coil_sens, regularization_value).abs()
         
     ##########################################################
@@ -216,8 +229,6 @@ class recotwix():
         idx_trigger_before = torch.searchsorted(trigger_timing, acquisition_timing) - 1
         RDs = torch.cat([torch.tensor([0]),trigger_timing.diff()])
         
-        RD_matrix.flatten()[acquisition_order] = RDs[idx_trigger_before]
-        
         if TI is None:
             try:
                 TI = self.twixobj['hdr']['Phoenix']['alTI'][0]*1e-6  # convert to seconds
@@ -225,7 +236,9 @@ class recotwix():
                 Warning('Fail to read TI')
                 TI = 0 # assume no TI
         # the recovery duration does not take into account the inversion time
-        RD_matrix -= TI
+        RDs -= TI
+        
+        RD_matrix.flatten()[acquisition_order] = RDs[idx_trigger_before]
         
         return RD_matrix
         
