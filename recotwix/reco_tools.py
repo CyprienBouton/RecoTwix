@@ -358,14 +358,24 @@ def grappa_reconstruction(kspace: torch.Tensor, acs: torch.Tensor, af):
     return kspace_reco_out
 
 
-def get_max_idx(tensor: torch.Tensor, dim: int = -1):
-    """Get the index of the maximum value along a specified dimension.
+def pics_reconstruction(kspace: torch.Tensor, coil_sens: torch.Tensor, regularization_value: float):
+    """Performs PICS reconstruction.
 
     Args:
-        tensor (torch.Tensor): Input tensor.
-        dim (int, optional): Dimension along which to find the maximum. Defaults to -1.
-
-    Returns:
-        torch.Tensor: Indices of the maximum values.
+        kspace (torch.Tensor): K-space data.
+        coil_sens (torch.Tensor): Coil sensitivity maps.
+        regularization_value (float): Regularization parameter.
     """
-    return tensor.abs().numpy().max(tuple(set(range(tensor.ndim)) - set([dim]))).argmax()
+    kspace_bart, unflatten_shape = toBART(kspace)
+    coil_sens_bart, _ = toBART(coil_sens)
+    # Apply wavelets along spatial axes: Par(10), Lin(13), Col(15)
+    transform_axes = (1 << 0) | (1 << 1) | (1 << 2)  # A
+    joint_thresh_axes = 0  # B (e.g., none or same as A if desired)
+
+    lambda_reg = regularization_value  # Regularization weight
+
+    # Format regularization string
+    reg_string = f"-R W:{transform_axes}:{joint_thresh_axes}:{lambda_reg} -S"
+    img_bart = bart(1, f"pics {reg_string}", kspace_bart.numpy(), coil_sens_bart.numpy())
+    img = fromBART(torch.from_numpy(img_bart), unflatten_shape)
+    return img
