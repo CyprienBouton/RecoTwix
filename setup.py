@@ -22,8 +22,8 @@ setup(name='recotwix', # this will be name of package in packages list : pip lis
             'numpy',
             'nibabel',
             'torch',
-            'twixtools', 
             'scipy',
             'ggrappa @ git+https://github.com/CyprienBouton/ggrappa.git@fix_grid_size',
+            'twixtools @ git+https://github.com/pehses/twixtools.git',
       ]
      )
