@@ -55,7 +55,7 @@ class recotwix():
         self.transformation = dict()
         self.prot = protocol_parse(self.twixmap)
         self._extract_transformation()        
-
+        self.kspace = self._getkspace()
 
     def __str__(self):
         s = f"\n{self.__class__.__module__}.{self.__class__.__qualname__}:\n"
@@ -71,9 +71,8 @@ class recotwix():
 
     def runReco(self, method_sensitivity='caldir'):     
         torch.cuda.empty_cache()   
-
-        kspace = self._getkspace()        
-        kspace = self.correct_scan_size(kspace, scantype='image')
+        
+        kspace = self.correct_scan_size(self.kspace, scantype='image')
         
         # Partial Fourier?
         if self.prot.isPartialFourierRO:
@@ -93,6 +92,7 @@ class recotwix():
             acs = kspace.clone()
             for dim_free in self.dim_free:
                 acs = acs.index_select(self.dim_info[dim_free]['ind'], torch.Tensor([0]).int()) 
+            acs = self.correct_scan_size(acs, scantype='image')
 
         if method_sensitivity is not None:
             coils_sensitivity = calc_coil_sensitivity(acs, dim_enc=self.dim_enc, method=method_sensitivity)
@@ -103,8 +103,7 @@ class recotwix():
     def runReco_GRAPPA(self):
         torch.cuda.empty_cache()   
 
-        kspace = self._getkspace()        
-        kspace = self.correct_scan_size(kspace, scantype='image')
+        kspace = self.correct_scan_size(self.kspace, scantype='image')
         
         # Parallel Imaging?
         if self.prot.isParallelImaging:
@@ -118,6 +117,7 @@ class recotwix():
             acs = kspace.clone()
             for dim_free in self.dim_free:
                 acs = acs.index_select(self.dim_info[dim_free]['ind'], torch.Tensor([0]).int()) 
+            acs = self.correct_scan_size(acs, scantype='refscan')
 
         af = [
             self.twixobj['hdr']['MeasYaps']['sPat']['lAccelFactPE'],
@@ -140,9 +140,8 @@ class recotwix():
         alpha: float = 1.,
         regularization_value = 0.1,
     ):
-        kspace = self._getkspace()
+        kspace = self.kspace / self.kspace.abs().max()
         RD_matrix = self.get_RD_matrix(trigger_method)
-        kspace /= kspace.abs().max()
         kspace_sparse = kspace.clone()
         
         broadcast_shape = [1] * kspace_sparse.ndim
@@ -159,7 +158,7 @@ class recotwix():
         if self.prot.isParallelImaging:
             self.twixmap['refscan'].flags['zf_missing_lines'] = not self.prot.isRefScanSeparate 
             acs = torch.from_numpy(self.twixmap['refscan'][:])
-            acs = self.correct_scan_size(acs, scantype='refscan')
+            acs = self.correct_scan_size(acs, scantype='image')
                     # Partial Fourier?
 
         else:
@@ -167,6 +166,7 @@ class recotwix():
             acs = kspace.clone()
             for dim_free in self.dim_free:
                 acs = acs.index_select(self.dim_info[dim_free]['ind'], torch.Tensor([0]).int()) 
+            acs = self.correct_scan_size(acs, scantype='image')
         
         coil_sens = calc_coil_sensitivity(acs, self.dim_enc, method=method)
         self.img = pics_reconstruction(kspace_sparse, coil_sens, regularization_value).abs()
