@@ -142,6 +142,7 @@ class recotwix():
     ):
         kspace = self._getkspace()
         RD_matrix = self.get_RD_matrix(trigger_method)
+        kspace /= kspace.abs().max()
         kspace_sparse = kspace.clone()
         
         broadcast_shape = [1] * kspace_sparse.ndim
