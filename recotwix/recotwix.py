@@ -133,11 +133,11 @@ class recotwix():
         self.img = coil_combination(kspace, coil_sens=None, dim_enc=self.dim_enc, rss=True)
     
         
-    def runReco_corrupted_RR_cs(
+    def runReco_corrupted_RD_cs(
         self,
         trigger_method = 'ECG1',
-        method: str = 'caldir',
-        alpha: float = 1.,
+        method = 'caldir',
+        delta_RD = 0.2,
         regularization_value = 0.1,
     ):
         kspace = self.kspace / self.kspace.abs().max()
@@ -150,7 +150,7 @@ class recotwix():
         flat = RD_matrix.flatten()
         non_zero = flat[flat != 0]
         mode_value = torch.mode(non_zero).values.item()
-        RD_mask = (abs(RD_matrix - mode_value) > alpha * RD_matrix.std() ).view(broadcast_shape)
+        RD_mask = (abs(RD_matrix - mode_value) > delta_RD ).view(broadcast_shape)
 
         # Apply masking to k-space
         kspace_sparse = kspace_sparse.masked_fill(RD_mask, 0)
