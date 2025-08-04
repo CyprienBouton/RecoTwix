@@ -117,7 +117,7 @@ class recotwix():
             acs = kspace.clone()
             for dim_free in self.dim_free:
                 acs = acs.index_select(self.dim_info[dim_free]['ind'], torch.Tensor([0]).int()) 
-            acs = self.correct_scan_size(acs, scantype='refscan')
+            acs = self.correct_scan_size(acs, scantype='image')
 
         af = [
             self.twixobj['hdr']['MeasYaps']['sPat']['lAccelFactPE'],
