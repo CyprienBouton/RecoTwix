@@ -105,9 +105,12 @@ def fromBART(kspace:torch.Tensor, unflatten_shape):
 # applying iFFT to kspace and build image
 def kspace_to_image(kspace:torch.Tensor, dim_enc=None, dim_loop=None, showProgress=True):
     img = torch.zeros_like(kspace, dtype=kspace.dtype, device=kspace.device)
+    indices = torch.arange(kspace.shape[dim_loop], device=kspace.device).long()
     for cha in tqdm(range(kspace.shape[dim_loop]), desc='k-space to image', disable=not showProgress):
-        img.index_copy_(dim_loop, torch.Tensor([cha]).long().to(kspace.device), 
-                        ifftnd(kspace.index_select(dim_loop, torch.Tensor([cha]).int().to(kspace.device)), axes=dim_enc)) 
+        selected = kspace.index_select(dim_loop, indices[cha:cha+1])
+        transformed = ifftnd(selected, axes=dim_enc)
+        img.index_copy_(dim_loop, indices[cha:cha+1], transformed)
+                
     return img
 
 
